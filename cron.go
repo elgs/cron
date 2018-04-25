@@ -38,28 +38,32 @@ type Entry struct {
 
 	// The next time the job will run. This is the zero time if Cron has not been
 	// started or this entry's schedule is unsatisfiable
-	Next time.Time
+	Next     time.Time
 
 	// The last time this job was run. This is the zero time if the job has never
 	// been run.
-	Prev time.Time
+	Prev     time.Time
 
 	// The Job to run.
-	Job Job
+	Job      Job
 
 	// The identifier to reference the job instance.
-	Id int
+	Id       int
 
 	// 0: normal, 1: paused
-	Status int
+	Status   int
 }
 
 // byTime is a wrapper for sorting the entry array by time
 // (with zero time at the end).
 type byTime []*Entry
 
-func (s byTime) Len() int      { return len(s) }
-func (s byTime) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+func (s byTime) Len() int {
+	return len(s)
+}
+func (s byTime) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
 func (s byTime) Less(i, j int) bool {
 	// Two zero times should return false.
 	// Otherwise, zero is "greater" than any other time.
@@ -88,11 +92,13 @@ func New() *Cron {
 // A wrapper that turns a func() into a cron.Job
 type FuncJob func()
 
-func (f FuncJob) Run() { f() }
+func (f FuncJob) Run() {
+	f()
+}
 
 // AddFunc adds a func to the Cron to be run on the given schedule.
-func (c *Cron) AddFunc(spec string, cmd func()) (int, error) {
-	return c.AddJob(spec, FuncJob(cmd))
+func (c *Cron) AddFunc(spec string, number int, cmd func()) (int, error) {
+	return c.AddJob(spec, number, FuncJob(cmd))
 }
 
 // RemoveFunc removes a func from the Cron referenced by the id.
@@ -126,6 +132,11 @@ func (c *Cron) ResumeFunc(id int) {
 	}
 }
 
+// Check if cron scheduler is running
+func (c *Cron) IsRunning() bool {
+	return c.running
+}
+
 // Status inquires the status of a job, 0: running, 1: paused, -1: not started.
 func (c *Cron) Status(id int) int {
 	for _, x := range c.entries {
@@ -136,16 +147,34 @@ func (c *Cron) Status(id int) int {
 	return -1
 }
 
+// Return Entry by Id
+func (c *Cron) EntryById(id int) *Entry {
+	for _, x := range c.entries {
+		if id == x.Id {
+			return x
+		}
+	}
+	return nil
+}
+
 // AddFunc adds a Job to the Cron to be run on the given schedule.
-func (c *Cron) AddJob(spec string, cmd Job) (int, error) {
+func (c *Cron) AddJob(spec string, number int, cmd Job) (int, error) {
+	cronJob := c.EntryById(number)
+	if ( cronJob != nil ) {
+		c.RemoveFunc(number)
+		c.count--
+	}
+
 	schedule, err := Parse(spec)
 	if err != nil {
 		return -1, err
 	}
 	c.count++
-	c.Schedule(schedule, cmd, c.count)
-	return c.count, nil
+	c.Schedule(schedule, cmd, number)
+	return number, nil
 }
+
+
 
 // Schedule adds a Job to the Cron to be run on the given schedule.
 func (c *Cron) Schedule(schedule Schedule, cmd Job, id int) {
@@ -161,6 +190,14 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job, id int) {
 	}
 
 	c.add <- entry
+}
+
+func (c *Cron) EntriesCount() int {
+	if c.running {
+		return c.count
+	}
+
+	return 0
 }
 
 // Entries returns a snapshot of the cron entries.
@@ -203,7 +240,7 @@ func (c *Cron) run() {
 		}
 		select {
 		case now = <-time.After(effective.Sub(now)):
-			// Run every entry whose next time was this effective time.
+		// Run every entry whose next time was this effective time.
 			for _, e := range c.entries {
 				if e.Next != effective {
 					break
